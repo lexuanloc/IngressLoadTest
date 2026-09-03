@@ -1,0 +1,7 @@
+{
+  "vehicle": "30A12345",
+  "timestamp": 1787970000,
+  "type": 1,
+  "value": 100,
+  "message": "IngressHost load test payload"
+}
