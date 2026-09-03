@@ -23,6 +23,15 @@ public sealed class LoadTestOptions
 
     public string PayloadFile { get; set; } = "payload.json";
 
+    /// <summary>
+    /// File chứa danh sách client test.
+    /// Mỗi dòng: MXN|BKS|IMEI
+    ///
+    /// Nếu để rỗng/null thì chương trình dùng nguyên payload.json
+    /// như phiên bản cũ và chỉ có một payload.
+    /// </summary>
+    public string? ClientDataFile { get; set; } = "clients.txt";
+
     public static LoadTestOptions Load(string fileName)
     {
         string json = File.ReadAllText(fileName);

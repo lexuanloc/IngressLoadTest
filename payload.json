@@ -1,7 +1,7 @@
 {
-  "vehicle": "30A12345",
-  "timestamp": 1787970000,
-  "type": 1,
-  "value": 100,
-  "message": "IngressHost load test payload"
+  "BKS": "29Y56789_C",
+  "IMEI": "864281042291089",
+  "MXN": "1010",
+  "Acquy": 19011,
+  "Time": 1787991770
 }

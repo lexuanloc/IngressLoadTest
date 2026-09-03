@@ -44,7 +44,8 @@ internal static class Program
 
     private static async Task<int> RunAsync(CancellationToken cancellationToken)
     {
-        (LoadTestOptions options, byte[] payload) = await LoadConfigurationAsync();
+        (LoadTestOptions options, PreparedPayload[] payloads) =
+            await LoadConfigurationAsync();
 
         Console.WriteLine($"Error log: {ErrorLogger.FilePath}");
 
@@ -52,7 +53,7 @@ internal static class Program
         {
             try
             {
-                using var tester = new LoadTester(options, payload);
+                using var tester = new LoadTester(options, payloads);
                 await tester.RunAsync(cancellationToken);
 
                 // Kết thúc bình thường theo DurationSeconds.
@@ -75,7 +76,8 @@ internal static class Program
                     return 101;
                 }
 
-                Console.WriteLine($"Tự khởi động lại test sau {options.RestartDelaySeconds} giây...");
+                Console.WriteLine(
+                    $"Tự khởi động lại test sau {options.RestartDelaySeconds} giây...");
 
                 await Task.Delay(
                     TimeSpan.FromSeconds(options.RestartDelaySeconds),
@@ -86,7 +88,8 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<(LoadTestOptions Options, byte[] Payload)> LoadConfigurationAsync()
+    private static async Task<(LoadTestOptions Options, PreparedPayload[] Payloads)>
+        LoadConfigurationAsync()
     {
         string baseDirectory = AppContext.BaseDirectory;
         string configPath = Path.Combine(baseDirectory, "appsettings.json");
@@ -94,12 +97,52 @@ internal static class Program
         LoadTestOptions options = LoadTestOptions.Load(configPath);
 
         string payloadPath =
-            Path.IsPathRooted(options.PayloadFile)
-                ? options.PayloadFile
-                : Path.Combine(baseDirectory, options.PayloadFile);
+            ResolvePath(
+                baseDirectory,
+                options.PayloadFile);
 
-        byte[] payload = await File.ReadAllBytesAsync(payloadPath);
-        return (options, payload);
+        byte[] templatePayload = await File.ReadAllBytesAsync(payloadPath);
+
+        if (string.IsNullOrWhiteSpace(options.ClientDataFile))
+        {
+            Console.WriteLine(
+                "ClientDataFile không được cấu hình. " +
+                "Sử dụng nguyên payload.json cho tất cả request.");
+
+            PreparedPayload[] singlePayload =
+                PayloadFactory.CreatePayloadsWithoutClientOverride(
+                    templatePayload);
+
+            return (options, singlePayload);
+        }
+
+        string clientDataPath =
+            ResolvePath(
+                baseDirectory,
+                options.ClientDataFile);
+
+        ClientIdentity[] clients =
+            ClientIdentityFile.Load(clientDataPath);
+
+        PreparedPayload[] payloads =
+            PayloadFactory.CreatePayloads(
+                templatePayload,
+                clients);
+
+        Console.WriteLine(
+            $"Đã tạo {payloads.Length:N0} payload từ {Path.GetFileName(clientDataPath)}.");
+
+        return (options, payloads);
+    }
+
+    private static string ResolvePath(
+        string baseDirectory,
+        string fileName)
+    {
+        return
+            Path.IsPathRooted(fileName)
+                ? fileName
+                : Path.Combine(baseDirectory, fileName);
     }
 
     private static void RegisterGlobalExceptionHandlers()

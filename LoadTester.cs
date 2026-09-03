@@ -8,15 +8,25 @@ namespace IngressLoadTest;
 public sealed class LoadTester : IDisposable
 {
     private readonly LoadTestOptions _options;
-    private readonly byte[] _payload;
+    private readonly PreparedPayload[] _payloads;
+    private readonly int _maxPayloadLength;
+
+    private long _payloadSequence = -1;
 
     private readonly HttpClient _httpClient;
     private readonly Uri[] _targets;
 
-    public LoadTester(LoadTestOptions options, byte[] payload)
+    public LoadTester(LoadTestOptions options, PreparedPayload[] payloads)
     {
+        if (payloads.Length == 0)
+        {
+            throw new ArgumentException("Payload list không được rỗng.", nameof(payloads));
+        }
+
         _options = options;
-        _payload = payload;
+        _payloads = payloads;
+        _maxPayloadLength = payloads.Max(
+            static payload => payload.MaxLength);
 
         var handler = new SocketsHttpHandler
         {
@@ -269,6 +279,11 @@ public sealed class LoadTester : IDisposable
         LoadStats stats,
         CancellationToken cancellationToken)
     {
+        // Mỗi worker có một buffer riêng và xử lý request tuần tự.
+        // Vì vậy có thể tái sử dụng buffer này mà không cần allocation
+        // byte[] mới cho từng request.
+        var payloadBuffer = new byte[_maxPayloadLength];
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -285,6 +300,7 @@ public sealed class LoadTester : IDisposable
                     await SendOneSafeAsync(
                         workerId,
                         portIndex,
+                        payloadBuffer,
                         stats,
                         cancellationToken);
                 }
@@ -316,6 +332,7 @@ public sealed class LoadTester : IDisposable
     private async Task SendOneSafeAsync(
         int workerId,
         int portIndex,
+        byte[] payloadBuffer,
         LoadStats stats,
         CancellationToken cancellationToken)
     {
@@ -333,7 +350,20 @@ public sealed class LoadTester : IDisposable
             request.Version = HttpVersion.Version11;
             request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
 
-            var content = new ByteArrayContent(_payload);
+            PreparedPayload payload = GetNextPayload();
+
+            long unixTimeSeconds =
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            int payloadLength =
+                payload.WriteTo(
+                    payloadBuffer,
+                    unixTimeSeconds);
+
+            var content = new ByteArrayContent(
+                payloadBuffer,
+                0,
+                payloadLength);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
             request.Content = content;
@@ -408,6 +438,17 @@ public sealed class LoadTester : IDisposable
         }
     }
 
+    private PreparedPayload GetNextPayload()
+    {
+        long sequence =
+            Interlocked.Increment(ref _payloadSequence);
+
+        int index =
+            (int)((ulong)sequence % (ulong)_payloads.Length);
+
+        return _payloads[index];
+    }
+
     private int[] CalculateRpsByPort()
     {
         var result = new int[_options.PortCount];
@@ -436,7 +477,26 @@ public sealed class LoadTester : IDisposable
         Console.WriteLine("HTTP         : HTTP/1.1");
         Console.WriteLine($"Target RPS   : {_options.TargetRps:N0}");
         Console.WriteLine($"RPS/port     : ~{_options.TargetRps / (double)_options.PortCount:F1}");
-        Console.WriteLine($"Payload      : {_payload.Length:N0} bytes");
+        long unixTimeSeconds =
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        int minPayloadBytes =
+            _payloads.Min(
+                payload => payload.GetLength(unixTimeSeconds));
+
+        int maxPayloadBytes =
+            _payloads.Max(
+                payload => payload.GetLength(unixTimeSeconds));
+
+        double averagePayloadBytes =
+            _payloads.Average(
+                payload => payload.GetLength(unixTimeSeconds));
+
+        Console.WriteLine($"Clients      : {_payloads.Length:N0}");
+        Console.WriteLine("Time         : Unix timestamp seconds, cập nhật mỗi request");
+        Console.WriteLine(
+            $"Payload bytes: avg={averagePayloadBytes:N1}, " +
+            $"min={minPayloadBytes:N0}, max={maxPayloadBytes:N0}");
         Console.WriteLine($"Workers      : {_options.WorkerCount}");
         Console.WriteLine($"Max conn/host: {_options.MaxConnectionsPerServer}");
         Console.WriteLine($"Timeout      : {_options.RequestTimeoutSeconds} s");
