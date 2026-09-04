@@ -11,6 +11,9 @@ internal static class Program
         ErrorLogger.Initialize();
         RegisterGlobalExceptionHandlers();
 
+        PlatformInfo.Print();
+        ErrorLogger.LogMessage($"Platform: {PlatformInfo.ToLogText()}", flushToDisk: true);
+
         using var stopCts = new CancellationTokenSource();
 
         Console.CancelKeyPress += (_, e) =>
